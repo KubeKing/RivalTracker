@@ -1,0 +1,8 @@
+# backend/requirements.txt
+flask==2.0.1
+flask-cors==3.0.10
+opencv-python==4.5.3.56
+pytesseract==0.3.8
+mss==6.1.0
+numpy==1.21.2
+python-dotenv==0.19.0
