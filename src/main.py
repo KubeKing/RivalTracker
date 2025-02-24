@@ -9,6 +9,7 @@ from datetime import datetime
 from capture import ScreenCapture
 from ocr import OCRProcessor
 from database import Database
+from tracker_lookup import TrackerLookup
 
 class MarvelTracker:
     def __init__(self):
@@ -24,11 +25,10 @@ class MarvelTracker:
         os.makedirs(log_dir, exist_ok=True)
         
         logging.basicConfig(
-            level=logging.DEBUG,
+            level=logging.ERROR,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler(os.path.join(log_dir, 'app.log')),
-                logging.StreamHandler(sys.stdout)
+                logging.FileHandler(os.path.join(log_dir, 'app.log'))
             ]
         )
         self.logger = logging.getLogger(__name__)
@@ -54,6 +54,7 @@ class MarvelTracker:
             self.screen_capture = ScreenCapture(self.config)
             self.ocr_processor = OCRProcessor(self.config)
             self.database = Database(self.config)
+            self.tracker_lookup = TrackerLookup(self.config)
             self.logger.info("Components initialized successfully")
         except Exception as e:
             self.logger.error(f"Error initializing components: {str(e)}")
@@ -62,17 +63,11 @@ class MarvelTracker:
     def setup_hotkey(self):
         """Set up the hotkey listener."""
         try:
-            self.logger.info("Setting up global hotkey...")
-            print("\nInitializing hotkey system...")
-            
             self.hotkey = GlobalHotkey(self.config['capture_key'], self.handle_hotkey)
             self.hotkey.start()
             
             # Give the hotkey thread a moment to initialize
             time.sleep(0.5)
-            
-            print(f"Listening for Alt+{self.config['capture_key'].upper()} key combination...")
-            print("Debug logging enabled - check logs/app.log for key events")
         except Exception as e:
             self.logger.error(f"Error setting up hotkey: {str(e)}")
             sys.exit(1)
@@ -81,7 +76,6 @@ class MarvelTracker:
         """Handle hotkey press event."""
         try:
             self.logger.info(f"Global hotkey triggered: {key}")
-            print(f"\nCapture triggered with {key} key")
             
             # Capture screen
             image_path = self.screen_capture.capture_window()
@@ -112,9 +106,11 @@ class MarvelTracker:
 
             if match_id:
                 self.logger.info(f"Successfully processed and stored match {match_id}")
-                print(f"\nMatch captured! Type: {game_info['match_type']}")
-                print(f"Friendly team: {', '.join(game_info['friendly_team'])}")
-                print(f"Enemy team: {', '.join(game_info['enemy_team'])}")
+                # Look up players on tracker.gg
+                self.tracker_lookup.lookup_players(
+                    friendly_team=game_info['friendly_team'],
+                    enemy_team=game_info['enemy_team']
+                )
             else:
                 self.logger.error("Failed to store match data")
 
@@ -135,9 +131,7 @@ class MarvelTracker:
     def run(self):
         """Run the main application loop."""
         try:
-            print(f"\nMarvel Tracker is running!")
-            print(f"Press 'Alt+{self.config['capture_key']}' to capture the game screen")
-            print("Press Ctrl+C to exit")
+            print(f"Marvel Tracker running. Press Alt+{self.config['capture_key'].upper()} to capture, Ctrl+C to exit.")
             
             # Keep the main thread alive and handle cleanup
             try:
@@ -147,10 +141,8 @@ class MarvelTracker:
                 self.logger.info("Received shutdown signal")
                 if hasattr(self, 'hotkey'):
                     self.hotkey.stop()
-                print("\nShutting down Marvel Tracker...")
         finally:
             self.cleanup()
-            print("Goodbye!")
 
 if __name__ == "__main__":
     tracker = MarvelTracker()
