@@ -25,7 +25,7 @@ class MarvelTracker:
         os.makedirs(log_dir, exist_ok=True)
         
         logging.basicConfig(
-            level=logging.ERROR,
+            level=logging.INFO,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             handlers=[
                 logging.FileHandler(os.path.join(log_dir, 'app.log'))
@@ -90,7 +90,7 @@ class MarvelTracker:
                 return
 
             # Extract game information
-            game_info = self.ocr_processor.find_game_info(text)
+            game_info = self.ocr_processor.find_game_info(text, image_path)
             if not game_info:
                 self.logger.error("Failed to extract game information")
                 return

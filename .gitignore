@@ -10,7 +10,9 @@ venv/
 
 # Project specific
 logs/
-data/*.db
+logs/app.log
+data/
+data/matches.db
 config/*.json
 temp/
 
