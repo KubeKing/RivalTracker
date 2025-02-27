@@ -13,25 +13,64 @@ from tracker_lookup import TrackerLookup
 
 class MarvelTracker:
     def __init__(self):
-        self.setup_logging()
+        # Set up basic logging first
+        self.setup_basic_logging()
+        
+        # Load config and reconfigure logging
         self.load_config()
+        self.setup_logging()
+        
+        # Initialize rest of the application
         self.initialize_components()
         self.setup_hotkey()
         self.logger.info("Marvel Tracker initialized successfully")
+
+    def setup_basic_logging(self):
+        """Set up basic logging before config is loaded."""
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        
+        # Create basic logger for startup
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(os.path.join(log_dir, 'app.log'), encoding='utf-8')
+            ]
+        )
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("Basic logging initialized")
 
     def setup_logging(self):
         """Set up logging configuration."""
         log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
         os.makedirs(log_dir, exist_ok=True)
         
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(os.path.join(log_dir, 'app.log'))
-            ]
-        )
+        # Get logging config from config file
+        log_config = self.config.get('logging', {})
+        log_level = getattr(logging, log_config.get('level', 'INFO'))
+        log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        log_file = os.path.join(log_dir, log_config.get('file', 'app.log'))
+        
+        # Create file handler with config
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler.setFormatter(logging.Formatter(log_format))
+        
+        # Configure root logger
+        root_logger = logging.getLogger()
+        root_logger.setLevel(log_level)
+        root_logger.handlers = []  # Remove any existing handlers
+        root_logger.addHandler(file_handler)
+        
+        # Set up OCR logger with debug level
+        ocr_logger = logging.getLogger('ocr')
+        ocr_logger.setLevel(logging.INFO)
+        # Ensure OCR logger propagates to root
+        ocr_logger.propagate = True
+        
+        # Create main logger for this class
         self.logger = logging.getLogger(__name__)
+        self.logger.info("Logging initialized with level %s", log_level)
 
     def load_config(self):
         """Load configuration from config file."""
@@ -52,9 +91,13 @@ class MarvelTracker:
         """Initialize main components."""
         try:
             self.screen_capture = ScreenCapture(self.config)
-            self.ocr_processor = OCRProcessor(self.config)
-            self.database = Database(self.config)
             self.tracker_lookup = TrackerLookup(self.config)
+            self.ocr_processor = OCRProcessor(
+                self.config,
+                screen_capture=self.screen_capture,
+                tracker_lookup=self.tracker_lookup
+            )
+            self.database = Database(self.config)
             self.logger.info("Components initialized successfully")
         except Exception as e:
             self.logger.error(f"Error initializing components: {str(e)}")
@@ -77,42 +120,13 @@ class MarvelTracker:
         try:
             self.logger.info(f"Global hotkey triggered: {key}")
             
-            # Capture screen
-            image_path = self.screen_capture.capture_window()
-            if not image_path:
-                self.logger.error("Failed to capture screen")
-                return
-
-            # Process image with OCR
-            text = self.ocr_processor.extract_text(image_path)
-            if not text:
-                self.logger.error("Failed to extract text from image")
-                return
-
-            # Extract game information
-            game_info = self.ocr_processor.find_game_info(text, image_path)
-            if not game_info:
-                self.logger.error("Failed to extract game information")
-                return
-
-            # Store in database
-            match_id = self.database.store_match(
-                game_info['match_type'],
-                game_info['friendly_team'],
-                game_info['enemy_team'],
-                text,
-                image_path
-            )
-
-            if match_id:
-                self.logger.info(f"Successfully processed and stored match {match_id}")
-                # Look up players on tracker.gg
-                self.tracker_lookup.lookup_players(
-                    friendly_team=game_info['friendly_team'],
-                    enemy_team=game_info['enemy_team']
-                )
+            # Capture the screenshot and get the filepath
+            screenshot_path = self.screen_capture.capture_window()
+            if screenshot_path:
+                # Process the captured screenshot
+                self.ocr_processor.process_uploaded_image(screenshot_path)
             else:
-                self.logger.error("Failed to store match data")
+                self.logger.error("Failed to capture screenshot")
 
         except Exception as e:
             self.logger.error(f"Error processing capture: {str(e)}")

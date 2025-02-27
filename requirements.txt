@@ -1,9 +1,8 @@
-Pillow==10.2.0
-pytesseract==0.3.10
-keyboard==0.13.5
-pywin32==306
-opencv-python==4.9.0.80
-numpy==1.24.4  # Required for image comparison
+Pillow==10.2.0  # For image handling
+keyboard==0.13.5  # For hotkey support
+pywin32==306  # For Windows-specific functionality
 mss==9.0.1  # Fast screen capture
 requests==2.31.0  # For making HTTP requests
 beautifulsoup4==4.12.3  # For parsing HTML
+openai==1.64.0  # For GPT-4 Vision API
+httpx==0.27.2  # For making HTTP requests

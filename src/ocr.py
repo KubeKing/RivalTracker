@@ -1,186 +1,109 @@
-import cv2
-import numpy as np
-import pytesseract
+import json
 import logging
-from PIL import Image
-import os
-import re
-
-# Set Tesseract path
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+import base64
+from openai import OpenAI
+from capture import ScreenCapture
+from tracker_lookup import TrackerLookup
 
 class OCRProcessor:
-    def __init__(self, config):
+    def __init__(self, config, screen_capture=None, tracker_lookup=None):
         self.config = config
         self.logger = logging.getLogger(__name__)
-        self.language = config['ocr_settings']['language']
-        self.preprocessing_enabled = False  # Default to disabled
-        
-        # Enable debug logging for OCR
-        self.logger.setLevel(logging.DEBUG)
+        self.screen_capture = screen_capture or ScreenCapture(config)
+        self.tracker_lookup = tracker_lookup or TrackerLookup(config)
 
-    def extract_text(self, image_path):
-        """Extract raw text from an image using OCR."""
+        openai_settings = self.config.get('openai_settings', {})
+        self.openai_api_key = openai_settings.get('api_key')
+        self.openai_model = openai_settings.get('model')
+        self.max_tokens = openai_settings.get('max_tokens', 300)
+
+        # Initialize the OpenAI client
+        self.client = OpenAI(api_key=self.openai_api_key)
+
+    def encode_image(self, image_path):
+        """
+        Encodes an image file to base64 string.
+        """
         try:
-            self.logger.info(f"Extracting text from image: {image_path}")
-            text = pytesseract.image_to_string(Image.open(image_path), lang=self.language)
-            self.logger.info(f"Extracted text:\n{text}")
-            return text.strip()
+            with open(image_path, "rb") as image_file:
+                return base64.b64encode(image_file.read()).decode("utf-8")
         except Exception as e:
-            self.logger.error(f"Error performing OCR: {str(e)}")
+            self.logger.error(f"Error encoding image: {e}")
             return None
 
-    def extract_text_with_positions(self, image_path):
-        """Extracts text along with bounding box positions."""
+    def extract_usernames(self, image_path):
         try:
-            image = cv2.imread(image_path)
-            extracted_data = []
-            seen_positions = set()  # Track text positions to avoid duplicates
-            
-            # Multiple OCR passes with different configurations
-            configs = [
-                # First pass - sparse text
-                r'--oem 3 --psm 11 -c tessedit_char_whitelist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-\\|\'!"',
-                # Second pass - uniform text block
-                r'--oem 3 --psm 6 -c tessedit_char_whitelist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-\\|\'!"',
-                # Third pass - single line
-                r'--oem 3 --psm 7 -c tessedit_char_whitelist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-\\|\'!"'
+            # Encode the image to base64
+            base64_image = self.encode_image(image_path)
+            if not base64_image:
+                self.logger.error("Image encoding failed.")
+                return [], []
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are analyzing a game screen image to identify player usernames. "
+                        "Return valid JSON with the structure:\n"
+                        "{\n"
+                        "  \"friendly_team\": [\"username1\", \"username2\", ...],\n"
+                        "  \"enemy_team\": [\"username3\", \"username4\", ...]\n"
+                        "}\n"
+                        "Only include real player usernames from the image. "
+                        "No additional keys or text. Do not include ```json``` code block."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "List all the usernames from this game screen. Focus only on player names. Return them in the JSON format described above."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                        }
+                    ]
+                }
             ]
-            
-            for config in configs:
-                data = pytesseract.image_to_data(
-                    image,
-                    output_type=pytesseract.Output.DICT,
-                    config=config
-                )
 
-                for i in range(len(data["text"])):
-                    text = data["text"][i].strip()
-                    if text:
-                        x = data["left"][i]
-                        y = data["top"][i]
-                        w = data["width"][i]
-                        h = data["height"][i]
-                        conf = float(data["conf"][i])
-                        
-                        # Create position key to avoid duplicates
-                        pos_key = f"{x},{y}"
-                        
-                        # Only add if position is new
-                        if pos_key not in seen_positions:
-                            seen_positions.add(pos_key)
-                            extracted_data.append({
-                                "text": text,
-                                "x": x,
-                                "y": y,
-                                "w": w,
-                                "h": h,
-                                "conf": conf
-                            })
-                            
-                            # Debug logging
-                            self.logger.debug(f"Detected text: '{text}' at ({x},{y}) with confidence {conf}")
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",  # Using vision model instead of text model
+                messages=messages,
+                max_tokens=self.max_tokens,
+                temperature=0.5
+            )
 
-            return extracted_data, image.shape[1]
+            # Log the raw GPT output for debugging purposes
+            #self.logger.info("Raw GPT input: %s", messages)
+            content = response.choices[0].message.content
+            self.logger.info("Raw GPT JSON output: %s", content)
+
+            # Parse the returned JSON
+            extracted_data = json.loads(content.strip())
+
+            friendly = extracted_data.get('friendly_team', [])
+            enemy = extracted_data.get('enemy_team', [])
+
+            return friendly, enemy
+
         except Exception as e:
-            self.logger.error(f"Error extracting text with positions: {str(e)}")
-            return [], 0
-        except Exception as e:
-            self.logger.error(f"Error extracting text with positions: {str(e)}")
-            return [], 0
+            self.logger.error(f"Error extracting usernames: {e}")
+            return [], []
 
-    def classify_players_by_position(self, extracted_data, image_width):
-        """Categorizes players based on their position in the image."""
-        try:
-            game_info = {"friendly_team": [], "enemy_team": []}
-            midpoint = image_width // 2
+    def process_uploaded_image(self, image_path):
+        """
+        Processes an uploaded image by extracting usernames via GPT and performing tracker lookup.
+        """
+        friendly_team, enemy_team = self.extract_usernames(image_path)
 
-            # More flexible pattern for level + player name format
-            # Matches formats like "42\JeeSama", "35| DonFrank", "30! cipys", "40'KFKenny"
-            # Also handles numbers in names like "ironman1731" and "aDuckOnQuack40"
-            player_pattern = re.compile(r'(\d{1,3})(?:[\\\|\'!]\s*|\s+)([A-Za-z0-9][A-Za-z0-9_-]{2,})')
+        if not friendly_team and not enemy_team:
+            self.logger.error("No usernames were extracted from the uploaded image.")
+            return
 
-            # Core UI text to filter
-            ui_text = {
-                'DEFEND', 'ATTACK', 'HELP', 'PREVENT', 'UID', 'STATUE', 'BAST', 
-                'HALL', 'DJALIA', 'INTERGALACTIC', 'EMPIRE', 'WAKANDA', 'COMPETITIVE', 
-                'CONVERGENCE', 'EXPLORER', 'CHRONO', 'FPS'
-            }
-
-            # Special cases - known player names that might have low confidence
-            special_cases = {
-                'aDuckOnQuack40',
-                'Khalteck_x2'
-            }
-
-            # Process each detected text
-            for item in extracted_data:
-                text = item["text"]
-                x = item["x"]
-                confidence = item.get("conf", 0)
-                
-                # Skip confidence check for special cases
-                should_process = any(special_case in text for special_case in special_cases) or confidence >= 0.1
-                
-                if should_process:
-                    # Look for level + name pattern
-                    match = player_pattern.search(text)
-                    if match:
-                        level = match.group(1)
-                        player_name = match.group(2).strip()
-                        
-                        # Basic validation rules
-                        if (len(player_name) >= 3 and  # Must be at least 3 characters
-                            player_name.upper() not in ui_text and  # Not UI text
-                            not any(ui_word.lower() in player_name.lower() for ui_word in ['Chrono', 'Explorer'])):  # Not title text
-                            
-                            # Handle special cases directly
-                            if any(special_case in text for special_case in special_cases):
-                                for special_case in special_cases:
-                                    if special_case in text:
-                                        player_name = special_case
-                                        break
-                            
-                            # Assign to team based on x position
-                            if x < midpoint:
-                                if player_name not in game_info["friendly_team"]:
-                                    game_info["friendly_team"].append(player_name)
-                            else:
-                                if player_name not in game_info["enemy_team"]:
-                                    game_info["enemy_team"].append(player_name)
-
-            # Remove any duplicates
-            game_info["friendly_team"] = list(dict.fromkeys(game_info["friendly_team"]))
-            game_info["enemy_team"] = list(dict.fromkeys(game_info["enemy_team"]))
-
-            return game_info
-        except Exception as e:
-            self.logger.error(f"Error classifying players: {str(e)}")
-            return {"friendly_team": [], "enemy_team": []}
-        
-    def find_game_info(self, text, image_path):
-        """Extracts game-related information from raw OCR text and image."""
-        try:
-            self.logger.info("Analyzing extracted text for game information...")
-            game_info = {"match_type": None, "friendly_team": [], "enemy_team": []}
-
-            # Detect match type from OCR text
-            if "DEFEND" in text:
-                game_info["match_type"] = "DEFEND"
-            elif "ATTACK" in text:
-                game_info["match_type"] = "ATTACK"
-
-            # Extract player positions from image
-            extracted_data, image_width = self.extract_text_with_positions(image_path)
-            if extracted_data:
-                player_positions = self.classify_players_by_position(extracted_data, image_width)
-                game_info.update(player_positions)
-
-            self.logger.info(f"Match Type: {game_info['match_type']}")
-            self.logger.info(f"Friendly Team: {game_info['friendly_team']}")
-            self.logger.info(f"Enemy Team: {game_info['enemy_team']}")
-
-            return game_info
-        except Exception as e:
-            self.logger.error(f"Error extracting game info: {str(e)}")
-            return None
+        self.logger.info(f"Extracted usernames - Friendly: {friendly_team}, Enemy: {enemy_team}")
+        self.tracker_lookup.lookup_players(
+            friendly_team=friendly_team, 
+            enemy_team=enemy_team
+        )
