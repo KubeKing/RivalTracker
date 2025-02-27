@@ -6,3 +6,4 @@ requests==2.31.0  # For making HTTP requests
 beautifulsoup4==4.12.3  # For parsing HTML
 openai==1.64.0  # For GPT-4 Vision API
 httpx==0.27.2  # For making HTTP requests
+python-dotenv==1.0.1  # For loading environment variables

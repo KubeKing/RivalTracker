@@ -2,6 +2,8 @@ import json
 import logging
 import base64
 from openai import OpenAI
+from dotenv import load_dotenv
+import os
 from capture import ScreenCapture
 from tracker_lookup import TrackerLookup
 
@@ -12,13 +14,16 @@ class OCRProcessor:
         self.screen_capture = screen_capture or ScreenCapture(config)
         self.tracker_lookup = tracker_lookup or TrackerLookup(config)
 
+        # Load environment variables
+        load_dotenv()
+        
+        # Get settings from config and environment
         openai_settings = self.config.get('openai_settings', {})
-        self.openai_api_key = openai_settings.get('api_key')
-        self.openai_model = openai_settings.get('model')
+        self.openai_model = openai_settings.get('model', 'gpt-4-turbo')
         self.max_tokens = openai_settings.get('max_tokens', 300)
 
-        # Initialize the OpenAI client
-        self.client = OpenAI(api_key=self.openai_api_key)
+        # Initialize the OpenAI client using environment variable
+        self.client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
     def encode_image(self, image_path):
         """
