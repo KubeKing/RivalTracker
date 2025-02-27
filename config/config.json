@@ -1,0 +1,30 @@
+{
+  "flaresolverr": {
+    "url": "http://localhost:8191/v1",
+    "max_timeout": 60000,
+    "retry_attempts": 3,
+    "retry_delay": 1000,
+    "min_request_delay": 5000,
+    "max_request_delay": 10000
+  },
+  "lookup_friendly_team": false,
+  "lookup_enemy_team": true,
+  "browser_profiles": [
+    {
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+      "language": "en-US,en;q=0.7"
+    }
+  ],
+  "openai_settings": {
+    "model": "gpt-4o-mini",
+    "max_tokens": 300
+  },
+  "temp_folder": "temp",
+  "game_window_title": "Marvel Rivals  ",
+  "database_path": "data/matches.db",
+  "capture_key": "home",
+  "logging": {
+    "level": "INFO",
+    "file": "app.log"
+  }
+}
